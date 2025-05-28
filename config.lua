@@ -17,9 +17,10 @@ private.config = {
 	looting		 = true,     -- fire when you yourself are looting something
 	creating 	 = true,	 -- fire when you craft items
 	rolling		 = true,	 -- fire when you roll items in an instance
+	forge		 = true,	 -- fire alerts only if item is forged
 	
 	--	toasts
-	money		 = true,	 -- display money toast
+	money		 = false,	 -- display money toast
 	recipes 	 = true,	 -- display recipe toast
 	honor		 = true,	 -- display battleground toast
 	

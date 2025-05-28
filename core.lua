@@ -338,7 +338,21 @@ function LootAlertFrame_OnEvent(self, event, ...)
 			-- print(itemType)
 			
 			if link then
-				LootAlertFrameMixIn:AddAlert(name, link, quality, texture, count, ignlevel, label, toast, rollType, roll);
+				if config.forge then
+					local forgeLevel = GetItemLinkTitanforge(link)
+					if forgeLevel > 0 then
+						if forgeLevel == 1 then
+							label = label.." Titanforged";
+						elseif forgeLevel == 2 then
+							label = label.." Warforged";
+						elseif forgeLevel == 3 then
+							label = label.." Lightforged";
+						end
+						LootAlertFrameMixIn:AddAlert(name, link, quality, texture, count, ignlevel, label, toast, rollType, roll);
+					end
+				else
+					LootAlertFrameMixIn:AddAlert(name, link, quality, texture, count, ignlevel, label, toast, rollType, roll);
+				end	
 			end
 		end
 	end
