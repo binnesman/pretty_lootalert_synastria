@@ -22,7 +22,6 @@ Added support for Synastria's forge system
 - Download latest version
 - Extract zip file
 - Move sub folder to AddOns
-- Remove the word ***-master*** from folder name
 - Enjoy!
 
 ## Settings
