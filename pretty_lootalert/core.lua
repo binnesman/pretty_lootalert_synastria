@@ -59,6 +59,7 @@ local GetAmountBattlefieldBonus = private.GetAmountBattlefieldBonus;
 -- /* assets */
 local assets = [[Interface\AddOns\pretty_lootalert\assets\]];
 local picn = assets.."UI-TradeSkill-Circle";
+local bountiedIcon = "Interface/MoneyFrame/UI-GoldIcon";
 local SOUNDKIT = {
 	UI_EPICLOOT_TOAST = assets.."ui_epicloot_toast_01.ogg",
 	UI_GARRISON_FOLLOWER_LEARN_TRAIT = assets.."ui_garrison_follower_trait_learned_02.ogg",
@@ -204,23 +205,20 @@ function LootAlertFrameMixIn:AdjustAnchors()
 	local previousButton;
 	for i=1, LOOTALERT_NUM_BUTTONS do
 		local button = self.alertButton[i];
-		if button then
-			button:ClearAllPoints();
-			if button:IsShown() then
-				local x, y = button:GetCenter();
-				if x and y and (x < 100 and y > (UIParent:GetHeight() - 100)) then
-					button:Hide();
-					return;
-				end
-				if button.waitAndAnimOut:GetProgress() <= 0.74 then
-					if not previousButton or previousButton == button then
-						button:SetPoint("BOTTOM", UIParent, "BOTTOM", point_x, point_y + 128);
+		button:ClearAllPoints();
+		if button and button:IsShown() then
+			if button.waitAndAnimOut:GetProgress() <= 0.74 then
+				if not previousButton or previousButton == button then
+					if DungeonCompletionAlertFrame1:IsShown() then
+						button:SetPoint("BOTTOM", DungeonCompletionAlertFrame1, "TOP", point_x, point_y);
 					else
-						button:SetPoint("BOTTOM", previousButton, "TOP", 0, offset_x);
+						button:SetPoint("CENTER", DungeonCompletionAlertFrame1, "CENTER", point_x, point_y);
 					end
+				else
+					button:SetPoint("BOTTOM", previousButton, "TOP", 0, offset_x);
 				end
-				previousButton = button;
 			end
+			previousButton = button;
 		end
 	end
 end
@@ -232,9 +230,6 @@ function LootAlertFrame_OnLoad(self)
 	self:RegisterEvent("CHAT_MSG_SYSTEM");
 	self:RegisterEvent("CHAT_MSG_MONEY");
 	self:RegisterEvent("UPDATE_BATTLEFIELD_STATUS");
-	self:RegisterEvent("PLAYER_ENTERING_WORLD");
-	self:RegisterEvent("DISPLAY_SIZE_CHANGED");
-	self:RegisterEvent("UI_SCALE_CHANGED");
 
 	mixin(self, LootAlertFrameMixIn);
 end
@@ -287,12 +282,6 @@ local function LootAlertFrame_HandleChatMessage(message)
 end
 
 function LootAlertFrame_OnEvent(self, event, ...)
-	if event == "PLAYER_ENTERING_WORLD" or 
-	   event == "DISPLAY_SIZE_CHANGED" or 
-	   event == "UI_SCALE_CHANGED" then
-		LootAlertFrameMixIn:AdjustAnchors();
-		return;
-	end
 	if event == "CHAT_MSG_LOOT" then
 		local player, label, toast;
 		local itemName					  = arg1:match(P_LOOT_ITEM);
@@ -326,20 +315,90 @@ function LootAlertFrame_OnEvent(self, event, ...)
 			local pets		  = subType == PET or subType == PETS;
 			local mounts	  = subType == ITEM_TYPE_MOUNT or subType == ITEM_TYPE_MOUNTS;
 			
-			if average then toast = "defaulttoast"; end
-			if common then toast = "commontoast"; end
-			if heroic then toast = "heroictoast"; end
+
+			-- Check for forge level
+			local forgeLevel = 0;
+			local isForged = false;
+			if link and _G.GetItemLinkTitanforge then
+				forgeLevel = _G.GetItemLinkTitanforge(link) or 0;
+				isForged = forgeLevel > 0;
+			end
 			
-			if legendary then
+			-- Check for bountied items
+			local isBountied = false;
+			if link then
+				local itemId = tonumber(link:match("item:(%d+)"));
+				if itemId and _G.GetCustomGameData then
+					isBountied = (_G.GetCustomGameData(31, itemId) or 0) > 0;
+				end
+			end
+			
+			-- Check for mythic + new attunable combination
+			local isNewAttunable = false;
+			local isMythicAttunable = false;
+			
+			-- Only check for attunables if it's armor/weapon and the necessary APIs exist
+			if link and _G.CanAttuneItemHelper and _G.HasAttunedAnyVariantOfItem then
+				local itemId = tonumber(link:match("item:(%d+)"));
+				if itemId then
+					-- Check if item is attunable and not already attuned
+					local canAttune = _G.CanAttuneItemHelper(itemId);
+					local hasAttuned = _G.HasAttunedAnyVariantOfItem(itemId);
+					
+					if canAttune and canAttune > 0 and not hasAttuned then
+						isNewAttunable = true;
+						
+						-- Check if item is mythic using custom tags
+						local itemTags = _G.GetItemTagsCustom and _G.GetItemTagsCustom(itemId);
+						local isMythic = itemTags and bit.band(itemTags, 0x80) ~= 0; -- 0x80 = 128 = mythic bit
+						
+						if isMythic then
+							isMythicAttunable = true;
+							label = "MYTHIC ATTUNABLE!";
+							toast = "legendarytoast"; -- Use legendary effect for mythic attunables
+						else
+							label = "NEW ATTUNABLE!";
+							toast = "attunabletoast";
+						end
+					end
+				end
+			end
+			
+			-- **MAIN FILTER: Only show if it's forged OR new attunable armor/weapon OR bountied**
+			-- Also allow pets, mounts, and legendaries to pass through
+			local shouldShow = isForged or isNewAttunable or isBountied or pets or mounts or legendary;
+			
+			if not shouldShow then
+				return; -- Don't show this item
+			end
+			
+			-- Handle bountied items
+			if isBountied then
+				label = "BOUNTIED ITEM!";
+				toast = "bountiedtoast";
+				texture = bountiedIcon; -- Use gold coin icon
+			end
+			
+			-- Set default toast types (but don't override mythic attunable or bountied)
+			if not isMythicAttunable and not isBountied then
+				if average then toast = "defaulttoast"; end
+				if common then toast = "commontoast"; end
+				if heroic then toast = "heroictoast"; end
+			end
+			
+			-- Handle actual legendary items (but don't override mythic attunable or bountied)
+			if legendary and not isMythicAttunable and not isBountied then
 				label = LEGENDARY_ITEM_LOOT_LABEL;
 				toast = "legendarytoast";
 			end
+			
 			if pets then
 				toast = "pettoast";
 			elseif mounts then
 				toast = "mounttoast";
 			end
 			
+			-- Apply existing item type filters if configured
 			if config.filter then
 				for _, ignored in ipairs(config.filter_type) do
 					if tostring(itemType) == tostring(ignored) then
@@ -347,10 +406,21 @@ function LootAlertFrame_OnEvent(self, event, ...)
 					end
 				end
 			end
-			-- print(itemType)
 			
 			if link then
-				LootAlertFrameMixIn:AddAlert(name, link, quality, texture, count, ignlevel, label, toast, rollType, roll);
+				-- Add forge level to label if forged (and not overridden by bountied)
+				if isForged and not isBountied then
+					if forgeLevel == 1 then
+						label = (label or YOU_RECEIVED_LABEL).." Titanforged";
+					elseif forgeLevel == 2 then
+						label = (label or YOU_RECEIVED_LABEL).." Warforged";
+					elseif forgeLevel == 3 then
+						label = (label or YOU_RECEIVED_LABEL).." Lightforged";
+					end
+				end
+				
+				-- Add the alert (ignore level restrictions for new attunables, forged items, and bountied items)
+				LootAlertFrameMixIn:AddAlert(name, link, quality, texture, count, true, label, toast, rollType, roll);
 			end
 		end
 	end
@@ -486,8 +556,10 @@ function LootAlertButtonTemplate_OnShow(self)
 		local moneyToast 		= data.toast == "moneytoast";
 		local legendaryToast 	= data.toast == "legendarytoast";
 		local commonToast 		= data.toast == "commontoast";
+		local attunableToast    = data.toast == "attunabletoast";
+		local bountiedToast     = data.toast == "bountiedtoast";
 		local qualityColor 		= ITEM_QUALITY_COLORS[data.quality] or nil;
-		local averageToast		= not recipeToast and not moneyToast and not commonToast;
+		local averageToast		= not recipeToast and not moneyToast and not commonToast and not attunableToast and not bountiedToast;
 	
 		if data.count then
 			self.Count:SetText(data.count);
@@ -518,9 +590,9 @@ function LootAlertButtonTemplate_OnShow(self)
 		self.RecipeTitle:SetShown(recipeToast);
 		self.RecipeName:SetShown(recipeToast);
 		self.RecipeIcon:SetShown(recipeToast);
-		self.LessBackground:SetShown(commonToast);
-		self.LessItemName:SetShown(commonToast);
-		self.LessIcon:SetShown(commonToast);
+		self.LessBackground:SetShown(commonToast or bountiedToast);
+		self.LessItemName:SetShown(commonToast or bountiedToast);
+		self.LessIcon:SetShown(commonToast or bountiedToast);
 		self.LegendaryBackground:SetShown(legendaryToast);
 		self.RollWonTitle:SetShown(data.rollLink);
 		self.MoneyBackground:SetShown(moneyToast);
@@ -558,7 +630,20 @@ function LootAlertButtonTemplate_OnShow(self)
 			self.RecipeTitle:SetText(data.label);
 		end
 
-		if qualityColor then
+		-- Special color handling for mythic attunables using legendary toast
+		if legendaryToast and (data.label == "MYTHIC ATTUNABLE!" or string.find(data.label or "", "MYTHIC ATTUNABLE")) then
+			-- Use special mythic attunable colors (gold with teal tint)
+			self.ItemName:SetTextColor(1.0, 0.8, 0.0);
+			self.Label:SetTextColor(0.0, 1.0, 0.8);
+		elseif attunableToast then
+			-- Regular attunable color (teal) - use existing background
+			self.ItemName:SetTextColor(0.0, 1.0, 0.8);
+			self.Label:SetTextColor(0.0, 1.0, 0.8);
+		elseif bountiedToast then
+			-- Bountied item colors (gold)
+			self.LessItemName:SetTextColor(1.0, 0.84, 0.0); -- Gold color
+			self.Label:SetTextColor(1.0, 0.84, 0.0);
+		elseif qualityColor then
 			self.ItemName:SetTextColor(qualityColor.r, qualityColor.g, qualityColor.b);
 		end
 
@@ -569,6 +654,8 @@ function LootAlertButtonTemplate_OnShow(self)
 		if config.sound then
 			if legendaryToast then
 				PlaySoundFile(SOUNDKIT.UI_LEGENDARY_LOOT_TOAST);
+			elseif attunableToast or bountiedToast then
+				PlaySoundFile(SOUNDKIT.UI_GARRISON_FOLLOWER_LEARN_TRAIT);
 			elseif commonToast then
 				PlaySoundFile(SOUNDKIT.UI_RAID_LOOT_TOAST_LESSER_ITEM_WON);
 			elseif recipeToast then
@@ -582,6 +669,9 @@ function LootAlertButtonTemplate_OnShow(self)
 			if legendaryToast then
 				self.legendaryGlow.animIn:Play();
 				self.legendaryShine.animIn:Play();
+			elseif attunableToast or bountiedToast then
+				self.glow.animIn:Play();
+				self.shine.animIn:Play();
 			elseif recipeToast then
 				self.recipeGlow.animIn:Play();
 				self.recipeShine.animIn:Play();
